@@ -16,50 +16,53 @@ print("[Main] ESP32 EnvMonitor starting...")
 
 # Init display
 display.init()
-display.fill_screen(display.BLACK)
 
-# Show boot logo
+# === BOOT SEQUENCE ===
+# Phase 1: Logo with line reveal
 if display.show_logo("logo.bin"):
-    time.sleep(3)
+    time.sleep(2)
 
-display.fill_screen(display.BLACK)
-display.draw_text("EnvMonitor", 120, 60, display.CYAN, display.BLACK, 2)
-display.draw_text("Starting...", 120, 110, display.GRAY, display.BLACK, 1)
+# Phase 2: Title screen with scan effect
+display.boot_title()
+time.sleep_ms(500)
 
-# Connect WiFi
-display.draw_text("WiFi...", 120, 140, display.YELLOW, display.BLACK, 1)
+# Phase 3: Init systems with progress bar
+display.boot_progress(5, "Connecting WiFi...")
 ip, wifi_ok = wifi.connect(WIFI_SSID, WIFI_PASSWORD)
 if wifi_ok:
-    display.draw_text(ip, 120, 170, display.GREEN, display.BLACK, 1)
+    display.boot_progress(25, "WiFi: " + ip, display.GREEN)
     print("[Main] WiFi:", ip)
 else:
-    display.draw_text("No WiFi", 120, 170, display.RED, display.BLACK, 1)
+    display.boot_progress(25, "WiFi: Failed", display.RED)
     print("[Main] WiFi failed")
-time.sleep(1)
+time.sleep_ms(400)
 
-# Sync NTP time
+# NTP sync
 ntp_ok = False
 if wifi_ok:
-    display.draw_text("NTP sync...", 120, 200, display.YELLOW, display.BLACK, 1)
+    display.boot_progress(35, "Syncing time...")
     try:
         ntptime.host = "time.google.com"
         ntptime.settime()
         ntp_ok = True
+        display.boot_progress(45, "NTP synced", display.GREEN)
         print("[Main] NTP synced")
     except Exception as e:
+        display.boot_progress(45, "NTP failed", display.RED)
         print("[Main] NTP error:", e)
-time.sleep(1)
+time.sleep_ms(400)
 
-# Init SD card
-display.draw_text("SD Card...", 120, 230, display.YELLOW, display.BLACK, 1)
+# SD Card
+display.boot_progress(50, "Mounting SD card...")
 sd_ok = sdlog.init()
 if sd_ok:
-    display.draw_text("SD OK", 120, 250, display.GREEN, display.BLACK, 1)
+    display.boot_progress(60, "SD card ready", display.GREEN)
 else:
-    display.draw_text("No SD", 120, 250, display.RED, display.BLACK, 1)
+    display.boot_progress(60, "No SD card", display.RED)
+time.sleep_ms(400)
 
 # Init I2C + sensors
-display.draw_text("Sensors...", 120, 270, display.YELLOW, display.BLACK, 1)
+display.boot_progress(65, "Scanning sensors...")
 sensor = None
 light_sensor = None
 sht = None
@@ -73,6 +76,7 @@ try:
     print("[Main] I2C devices:", [hex(d) for d in devices])
 
     if 0x62 in devices:
+        display.boot_progress(70, "Init CO2 sensor...")
         from scd4x import SCD4X
         sensor = SCD4X(i2c)
         sensor.stop_periodic_measurement()
@@ -82,16 +86,19 @@ try:
         time.sleep(2)
 
     if 0x10 in devices:
+        display.boot_progress(80, "Init light sensor...")
         from veml7700 import VEML7700
         light_sensor = VEML7700(i2c)
         print("[Main] VEML7700 OK")
 
     if 0x44 in devices:
+        display.boot_progress(85, "Init temp sensor...")
         from sht4x import SHT4X
         sht = SHT4X(i2c)
         print("[Main] SHT4x OK")
 
     if 0x60 in devices:
+        display.boot_progress(90, "Init pressure sensor...")
         from mpl3115a2 import MPL3115A2
         pressure_sensor = MPL3115A2(i2c)
         print("[Main] MPL3115A2 OK")
@@ -99,8 +106,20 @@ try:
 except Exception as e:
     print("[Main] Sensor error:", e)
 
-time.sleep(1)
+display.boot_progress(100, "Ready!", display.GREEN)
+time.sleep_ms(800)
 display.fill_screen(display.BLACK)
+
+# RGB LED - common anode (low = on)
+led_r = machine.Pin(22, machine.Pin.OUT, value=1)
+led_g = machine.Pin(16, machine.Pin.OUT, value=1)
+led_b = machine.Pin(17, machine.Pin.OUT, value=1)
+
+def set_led(r, g, b):
+    """Set RGB LED (1=on, 0=off). Inverted for common anode."""
+    led_r.value(0 if r else 1)
+    led_g.value(0 if g else 1)
+    led_b.value(0 if b else 1)
 
 
 def get_time_str():
@@ -122,10 +141,31 @@ def get_date_str():
 
 # Alternate C/F each cycle
 show_f = True
+loop_count = 0
+NTP_RESYNC_CYCLES = int(3600 / LOG_INTERVAL)  # resync every hour
+WIFI_CHECK_CYCLES = int(60 / LOG_INTERVAL)    # check wifi every minute
 
 # Main loop
 print("[Main] Running...")
 while True:
+  try:
+    # WiFi auto-reconnect
+    if loop_count > 0 and loop_count % WIFI_CHECK_CYCLES == 0:
+        if not wifi.is_connected():
+            print("[Main] WiFi lost, reconnecting...")
+            ip, wifi_ok = wifi.connect(WIFI_SSID, WIFI_PASSWORD)
+            if wifi_ok:
+                print("[Main] WiFi reconnected:", ip)
+
+    # NTP resync periodically
+    if wifi.is_connected() and loop_count > 0 and loop_count % NTP_RESYNC_CYCLES == 0:
+        try:
+            ntptime.settime()
+            ntp_ok = True
+            print("[Main] NTP resynced")
+        except:
+            pass
+
     co2 = 0
     temp_val = 0.0
     temp_c_log = 0.0
@@ -150,8 +190,8 @@ while True:
         except Exception as e:
             print("[Main] SCD4x error:", e)
 
-    temp_c_log = temp_c_log
-    if sht:
+    # SHT4x as backup only if SCD4x didn't provide temp
+    if sht and temp_c_log == 0.0:
         try:
             st, sh = sht.read()
             temp_c_log = st
@@ -186,7 +226,18 @@ while True:
                            status=status, unit_label=unit,
                            time_str=time_str, date_str=date_str)
     if sd_ok and time_str:
-        sdlog.log(date_str + " " + time_str, co2, temp_c_log, hum, lux, pressure)
+        lt = time.localtime(time.time() + TIMEZONE_OFFSET * 3600)
+        sdlog.log(date_str + " " + time_str, co2, temp_c_log, hum, lux, pressure, lt)
+    # LED: green=good, yellow=fair, red=poor CO2
+    if co2 > 0 and co2 < 1000:
+        set_led(0, 1, 0)
+    elif co2 >= 1000 and co2 < 1500:
+        set_led(1, 1, 0)
+    else:
+        set_led(1, 0, 0)
     show_f = not show_f
+    loop_count += 1
     gc.collect()
-    time.sleep(LOG_INTERVAL)
+  except Exception as e:
+    print("[Main] Loop error:", e)
+  time.sleep(LOG_INTERVAL)

@@ -117,7 +117,7 @@ def fill_screen(color):
 
 
 def show_logo(filename="logo.bin"):
-    """Display RGB565 logo from binary file, centered on screen"""
+    """Display RGB565 logo from binary file, centered on screen with line-by-line reveal"""
     import struct
     try:
         f = open(filename, 'rb')
@@ -126,20 +126,85 @@ def show_logo(filename="logo.bin"):
         x0 = (W - iw) // 2
         y0 = (H - ih) // 2
         fill_screen(WHITE)
-        set_window(x0, y0, x0 + iw - 1, y0 + ih - 1)
-        cs.value(0)
-        dc.value(1)
-        while True:
-            chunk = f.read(1024)
-            if not chunk:
+        # Reveal line by line for a cool wipe effect
+        row_bytes = iw * 2
+        for row in range(ih):
+            set_window(x0, y0 + row, x0 + iw - 1, y0 + row)
+            data = f.read(row_bytes)
+            if not data:
                 break
-            spi.write(chunk)
-        cs.value(1)
+            cs.value(0)
+            dc.value(1)
+            spi.write(data)
+            cs.value(1)
         f.close()
         return True
     except Exception as e:
         print("[Display] Logo error:", e)
         return False
+
+
+def _rgb565(r, g, b):
+    return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+
+def boot_progress(pct, msg="", msg_color=CYAN):
+    """Draw animated boot progress bar at bottom of screen"""
+    bar_y = H - 48
+    bar_h = 22
+    bar_x = 40
+    bar_w = W - 80
+    # Background bar
+    fill_rect(bar_x, bar_y, bar_w, bar_h, DKGRAY)
+    # Gradient fill - cyan to green
+    filled = int(bar_w * pct / 100)
+    if filled > 0:
+        step = max(1, filled // 20)
+        for i in range(0, filled, step):
+            blend = i * 255 // bar_w
+            r = 0
+            g = 128 + (blend >> 1)
+            b = 255 - blend
+            c = _rgb565(r, g, b)
+            sw = min(step, filled - i)
+            fill_rect(bar_x + i, bar_y, sw, bar_h, c)
+    # Bright tip
+    if filled > 2:
+        fill_rect(bar_x + filled - 2, bar_y, 2, bar_h, WHITE)
+    # Status text below bar
+    fill_rect(0, bar_y + bar_h + 2, W, 20, BLACK)
+    if msg:
+        mx = (W - text_px(msg, 1)) // 2
+        draw_text(msg, mx, bar_y + bar_h + 4, msg_color, BLACK, 1)
+
+
+def boot_title():
+    """Draw the boot title with scanning line effect"""
+    fill_screen(BLACK)
+    # Horizontal scan lines sweep
+    for i in range(0, H, 4):
+        c = _rgb565(0, int(i * 0.4), int(i * 0.8) & 0xFF)
+        hline(0, i, W, c)
+        if i % 16 == 0:
+            time.sleep_ms(5)
+    time.sleep_ms(200)
+    fill_screen(BLACK)
+    # Title
+    title = "EnvMonitor"
+    tx = (W - text_px(title, 3)) // 2
+    # Draw each letter with a slight delay
+    for i, ch in enumerate(title):
+        draw_char16(ch, tx + i * 48, 100, CYAN, BLACK, 3)
+        time.sleep_ms(60)
+    # Subtitle
+    time.sleep_ms(300)
+    sub = "Environmental Monitor"
+    sx = (W - text_px(sub, 1)) // 2
+    draw_text(sub, sx, 160, LTGRAY, BLACK, 1)
+    # Version line
+    ver = "v1.0"
+    vx = (W - text_px(ver, 1)) // 2
+    draw_text(ver, vx, 185, GRAY, BLACK, 1)
 
 
 def hline(x, y, w, color):
@@ -203,8 +268,12 @@ def draw_card(x, y, w, h, label, value, unit, val_color, bg=CARD_BG):
     round_rect(x, y, w, h, CARD_BRD, 2)
     lx = x + (w - text_px(label, 1)) // 2
     draw_text(label, lx, y + 4, WHITE, bg, 1)
-    vx = x + (w - text_px(value, 2)) // 2
-    draw_text(value, vx, y + 24, val_color, bg, 2)
+    # Clamp value to fit card width
+    vscale = 2
+    if text_px(value, 2) > w - 8:
+        vscale = 1
+    vx = x + (w - text_px(value, vscale)) // 2
+    draw_text(value, vx, y + 24, val_color, bg, vscale)
     ux = x + (w - text_px(unit, 1)) // 2
     draw_text(unit, ux, y + 60, LTGRAY, bg, 1)
 

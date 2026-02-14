@@ -22,6 +22,7 @@ class MPL3115A2:
         self.addr = MPL3115_I2CADDR
         self.mode = mode
         self._buf = bytearray(1)
+        self._last_p = 0.0
 
         if mode == PRESSURE:
             # Barometer mode, oversampling 128, min time 512ms
@@ -37,27 +38,30 @@ class MPL3115A2:
             raise ValueError("Invalid mode")
 
         # Wait for first reading
-        self._wait_ready()
+        if not self._wait_ready(timeout=2000):
+            raise OSError("MPL3115A2 not responding")
 
-    def _wait_ready(self, timeout=2000):
+    def _wait_ready(self, timeout=600):
         start = time.ticks_ms()
         while True:
             self.i2c.readfrom_mem_into(self.addr, MPL3115_STATUS, self._buf)
             if self._buf[0] & 0x04:
                 return True
             if time.ticks_diff(time.ticks_ms(), start) > timeout:
-                raise OSError("MPL3115A2 timeout")
+                return False
             time.sleep_ms(10)
 
     def pressure(self):
         """Read pressure in Pascals, returns hPa (mbar)"""
         if self.mode != PRESSURE:
             raise ValueError("Not in pressure mode")
-        self._wait_ready()
+        if not self._wait_ready():
+            return self._last_p
         data = self.i2c.readfrom_mem(self.addr, MPL3115_PRESSURE_DATA_MSB, 3)
         p_int = (data[0] << 10) | (data[1] << 2) | ((data[2] >> 6) & 0x03)
         p_frac = (data[2] >> 4) & 0x03
-        return (p_int + p_frac / 4.0) / 100.0  # Convert Pa to hPa
+        self._last_p = (p_int + p_frac / 4.0) / 100.0
+        return self._last_p
 
     def altitude(self):
         """Read altitude in meters"""

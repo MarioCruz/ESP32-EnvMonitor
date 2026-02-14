@@ -1,6 +1,5 @@
 """Simple SHT4x temperature/humidity sensor driver"""
 import time
-import struct
 
 SHT4X_ADDR = 0x44
 _MEASURE_HIGH = 0xFD  # High precision measurement

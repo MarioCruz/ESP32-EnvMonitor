@@ -5,12 +5,21 @@ import os
 _sd = None
 _mounted = False
 _LOG_FILE = "/sd/envlog.csv"
+_LOG_DIR = "/sd"
 
 
 def init():
     """Mount SD card. Returns True if successful."""
     global _sd, _mounted
     try:
+        # Check if already mounted
+        try:
+            os.statvfs("/sd")
+            _mounted = True
+            print("[SD] Already mounted")
+            return True
+        except:
+            pass
         import sdcard
         spi2 = machine.SPI(2, baudrate=1000000,
                            sck=machine.Pin(18),
@@ -34,12 +43,25 @@ def init():
         return False
 
 
-def log(timestamp, co2, temp_c, humidity, lux, pressure):
-    """Append one row to CSV"""
+def _log_filename(t):
+    """Get log filename for given localtime tuple: envlog_YYMMDD.csv"""
+    return "{}/envlog_{:02d}{:02d}{:02d}.csv".format(
+        _LOG_DIR, t[0] % 100, t[1], t[2])
+
+
+def log(timestamp, co2, temp_c, humidity, lux, pressure, localtime=None):
+    """Append one row to CSV, rotating file daily"""
     if not _mounted:
         return False
     try:
-        with open(_LOG_FILE, "a") as f:
+        fname = _log_filename(localtime) if localtime else _LOG_FILE
+        # Write header if new file
+        try:
+            os.stat(fname)
+        except:
+            with open(fname, "w") as f:
+                f.write("timestamp,co2,temp_c,humidity,lux,pressure_hpa\n")
+        with open(fname, "a") as f:
             f.write("{},{},{:.1f},{:.1f},{},{:.0f}\n".format(
                 timestamp, co2, temp_c, humidity, int(lux), pressure))
         return True
