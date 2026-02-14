@@ -279,12 +279,37 @@ def draw_card(x, y, w, h, label, value, unit, val_color, bg=CARD_BG):
 
 
 def draw_dashboard(co2, temp, hum, lux=0, pressure=0, sd_free="--",
-                   status="", unit_label="F", time_str="", date_str=""):
+                   status="", unit_label="F", time_str="", date_str="",
+                   batt_pct=-1):
     """Draw the full EnvMonitor dashboard - 3x3 grid"""
     # Title bar
     fill_rect(0, 0, W, 26, DKBLUE)
     draw_text("EnvMonitor", 8, 5, CYAN, DKBLUE, 1)
-    fill_rect(W - 14, 8, 10, 10, GREEN)
+    # Battery gauge top right
+    batt_x = W - 44
+    batt_y = 6
+    batt_w = 30
+    batt_h = 14
+    # Battery outline
+    fill_rect(batt_x, batt_y, batt_w, batt_h, DKBLUE)
+    # Border
+    fill_rect(batt_x, batt_y, batt_w, 1, LTGRAY)
+    fill_rect(batt_x, batt_y + batt_h - 1, batt_w, 1, LTGRAY)
+    fill_rect(batt_x, batt_y, 1, batt_h, LTGRAY)
+    fill_rect(batt_x + batt_w - 1, batt_y, 1, batt_h, LTGRAY)
+    # Tip
+    fill_rect(batt_x + batt_w, batt_y + 4, 3, 6, LTGRAY)
+    # Fill based on percentage
+    if batt_pct >= 0:
+        fill_w = max(0, min(batt_w - 4, int((batt_w - 4) * batt_pct / 100)))
+        if batt_pct > 50:
+            bc = GREEN
+        elif batt_pct > 20:
+            bc = YELLOW
+        else:
+            bc = RED
+        if fill_w > 0:
+            fill_rect(batt_x + 2, batt_y + 2, fill_w, batt_h - 4, bc)
 
     # 3x3 card grid
     card_w = 152

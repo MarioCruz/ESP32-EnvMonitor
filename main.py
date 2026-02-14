@@ -115,6 +115,22 @@ led_r = machine.Pin(22, machine.Pin.OUT, value=1)
 led_g = machine.Pin(16, machine.Pin.OUT, value=1)
 led_b = machine.Pin(17, machine.Pin.OUT, value=1)
 
+# Battery ADC on GPIO34
+batt_adc = machine.ADC(machine.Pin(34))
+batt_adc.atten(machine.ADC.ATTN_11DB)  # Full range 0-3.3V
+
+def read_battery_pct():
+    """Read battery percentage from ADC. Returns -1 if no battery."""
+    raw = batt_adc.read()
+    # ESP32 ADC is 12-bit (0-4095), with voltage divider on board
+    # Typical: 4.2V full = ~2.1V at ADC, 3.0V empty = ~1.5V at ADC
+    # With 11dB atten, ~0-3.6V range
+    voltage = raw / 4095 * 3.6 * 2  # x2 for voltage divider
+    if voltage < 2.5:
+        return -1  # No battery connected
+    pct = int((voltage - 3.0) / (4.2 - 3.0) * 100)
+    return max(0, min(100, pct))
+
 def set_led(r, g, b):
     """Set RGB LED (1=on, 0=off). Inverted for common anode."""
     led_r.value(0 if r else 1)
@@ -224,7 +240,8 @@ while True:
     display.draw_dashboard(co2, temp_val, hum, lux=lux, pressure=pressure,
                            sd_free=sdlog.free_space(),
                            status=status, unit_label=unit,
-                           time_str=time_str, date_str=date_str)
+                           time_str=time_str, date_str=date_str,
+                           batt_pct=read_battery_pct())
     if sd_ok and time_str:
         lt = time.localtime(time.time() + TIMEZONE_OFFSET * 3600)
         sdlog.log(date_str + " " + time_str, co2, temp_c_log, hum, lux, pressure, lt)

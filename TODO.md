@@ -10,7 +10,6 @@
 
 ## Other
 - [ ] Reformat SD card from Mac as FAT32 to get full 16GB
-- [ ] Touch screen integration (XPT2046, CS=GPIO33, IRQ=GPIO36)
 - [x] WiFi auto-reconnect if connection drops (checks every 60s)
 - [x] NTP re-sync periodically (resyncs every hour)
 - [x] CSV log file rotation (new file per day: envlog_YYMMDD.csv)

@@ -33,7 +33,7 @@ Built to work with the [EnvMonitor](https://github.com/MarioCruz/EnvMonitor) pro
 - 3.7V lithium battery support with charging circuit
 - RGB LED indicator
 - Speaker output (1.5W @ 8Ω or 2W @ 4Ω) via JST 1.25mm 2-pin connector
-- E32R40T model includes resistive touch screen (XPT2046)
+- E32R40T model includes resistive touch screen (XPT2046) — not present on E32N40T
 
 ### Sensors (I2C on GPIO25 SCL, GPIO32 SDA)
 
