@@ -211,10 +211,21 @@ def draw_dashboard(co2, temp, hum, status="Normal"):
     draw_card(x0, row2_y, card_w, card_h,
               "HUMIDITY", "{:.1f}".format(hum), "%", CYAN)
 
-    # Status
-    s_color = GREEN if status == "Normal" else RED
-    draw_card(x0 + card_w + gap, row2_y, card_w, card_h,
-              "STATUS", status, "ESP32", s_color)
+    # Status / WiFi card
+    sx = x0 + card_w + gap
+    fill_rect(sx, row2_y, card_w, card_h, CARD_BG)
+    round_rect(sx, row2_y, card_w, card_h, CARD_BRD, 2)
+    draw_text("WIFI", sx + (card_w - text_px("WIFI", 1)) // 2, row2_y + 6, LTGRAY, CARD_BG, 1)
+    # Use scale 1 for IP addresses (they're long), scale 2 for short status
+    if len(status) > 10:
+        vx = sx + (card_w - text_px(status, 1)) // 2
+        s_color = GREEN if "." in status else RED
+        draw_text(status, vx, row2_y + 38, s_color, CARD_BG, 1)
+    else:
+        vx = sx + (card_w - text_px(status, 2)) // 2
+        s_color = GREEN if status != "No WiFi" else RED
+        draw_text(status, vx, row2_y + 30, s_color, CARD_BG, 2)
+    draw_text("ESP32", sx + (card_w - text_px("ESP32", 1)) // 2, row2_y + 68, GRAY, CARD_BG, 1)
 
     # Bottom bar
     fill_rect(0, H - 18, W, 18, DKBLUE)
