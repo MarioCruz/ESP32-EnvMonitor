@@ -30,8 +30,8 @@ CYAN    = 0x07FF
 BLUE    = 0x001F
 YELLOW  = 0xFFE0
 DKBLUE  = 0x0010
-CARD_BG  = 0x1082
-CARD_BRD = 0x2945
+CARD_BG  = 0x2945
+CARD_BRD = 0x4A69
 
 
 # --- Low-level SPI commands ---
@@ -116,6 +116,32 @@ def fill_screen(color):
     fill_rect(0, 0, W, H, color)
 
 
+def show_logo(filename="logo.bin"):
+    """Display RGB565 logo from binary file, centered on screen"""
+    import struct
+    try:
+        f = open(filename, 'rb')
+        hdr = f.read(4)
+        iw, ih = struct.unpack('>HH', hdr)
+        x0 = (W - iw) // 2
+        y0 = (H - ih) // 2
+        fill_screen(WHITE)
+        set_window(x0, y0, x0 + iw - 1, y0 + ih - 1)
+        cs.value(0)
+        dc.value(1)
+        while True:
+            chunk = f.read(1024)
+            if not chunk:
+                break
+            spi.write(chunk)
+        cs.value(1)
+        f.close()
+        return True
+    except Exception as e:
+        print("[Display] Logo error:", e)
+        return False
+
+
 def hline(x, y, w, color):
     fill_rect(x, y, w, 1, color)
 
@@ -176,57 +202,78 @@ def draw_card(x, y, w, h, label, value, unit, val_color, bg=CARD_BG):
     fill_rect(x, y, w, h, bg)
     round_rect(x, y, w, h, CARD_BRD, 2)
     lx = x + (w - text_px(label, 1)) // 2
-    draw_text(label, lx, y + 6, LTGRAY, bg, 1)
+    draw_text(label, lx, y + 4, WHITE, bg, 1)
     vx = x + (w - text_px(value, 2)) // 2
-    draw_text(value, vx, y + 30, val_color, bg, 2)
+    draw_text(value, vx, y + 24, val_color, bg, 2)
     ux = x + (w - text_px(unit, 1)) // 2
-    draw_text(unit, ux, y + 68, GRAY, bg, 1)
+    draw_text(unit, ux, y + 60, LTGRAY, bg, 1)
 
 
-def draw_dashboard(co2, temp, hum, status="Normal"):
-    """Draw the full EnvMonitor dashboard - 2x2 grid"""
+def draw_dashboard(co2, temp, hum, lux=0, pressure=0, sd_free="--",
+                   status="", unit_label="F", time_str="", date_str=""):
+    """Draw the full EnvMonitor dashboard - 3x3 grid"""
     # Title bar
-    fill_rect(0, 0, W, 28, DKBLUE)
-    draw_text("EnvMonitor", 8, 6, CYAN, DKBLUE, 1)
-    fill_rect(W - 40, 8, 10, 10, GREEN)
-    draw_text("ON", W - 28, 6, GREEN, DKBLUE, 1)
+    fill_rect(0, 0, W, 26, DKBLUE)
+    draw_text("EnvMonitor", 8, 5, CYAN, DKBLUE, 1)
+    fill_rect(W - 14, 8, 10, 10, GREEN)
 
-    # Card layout
-    card_w = 230
-    card_h = 88
-    gap = 8
-    row1_y = 34
+    # 3x3 card grid
+    card_w = 152
+    card_h = 78
+    gap = 5
+    row1_y = 28
     row2_y = row1_y + card_h + gap
-    x0 = (W - (2 * card_w + gap)) // 2
+    row3_y = row2_y + card_h + gap
+    x0 = (W - (3 * card_w + 2 * gap)) // 2
 
-    # CO2
+    # Row 1: CO2, Temperature, Humidity
     co2_color = GREEN if co2 < 1000 else (YELLOW if co2 < 1500 else RED)
     draw_card(x0, row1_y, card_w, card_h, "CO2", str(co2), "ppm", co2_color)
 
-    # Temperature
     draw_card(x0 + card_w + gap, row1_y, card_w, card_h,
-              "TEMP", "{:.1f}".format(temp), "F", ORANGE)
+              "TEMP", "{:.1f}".format(temp), unit_label, ORANGE)
 
-    # Humidity
-    draw_card(x0, row2_y, card_w, card_h,
-              "HUMIDITY", "{:.1f}".format(hum), "%", CYAN)
+    draw_card(x0 + 2 * (card_w + gap), row1_y, card_w, card_h,
+              "HUMID", "{:.1f}".format(hum), "%", CYAN)
 
-    # Status / WiFi card
-    sx = x0 + card_w + gap
-    fill_rect(sx, row2_y, card_w, card_h, CARD_BG)
-    round_rect(sx, row2_y, card_w, card_h, CARD_BRD, 2)
-    draw_text("WIFI", sx + (card_w - text_px("WIFI", 1)) // 2, row2_y + 6, LTGRAY, CARD_BG, 1)
-    # Use scale 1 for IP addresses (they're long), scale 2 for short status
-    if len(status) > 10:
-        vx = sx + (card_w - text_px(status, 1)) // 2
-        s_color = GREEN if "." in status else RED
-        draw_text(status, vx, row2_y + 38, s_color, CARD_BG, 1)
-    else:
-        vx = sx + (card_w - text_px(status, 2)) // 2
-        s_color = GREEN if status != "No WiFi" else RED
-        draw_text(status, vx, row2_y + 30, s_color, CARD_BG, 2)
-    draw_text("ESP32", sx + (card_w - text_px("ESP32", 1)) // 2, row2_y + 68, GRAY, CARD_BG, 1)
+    # Row 2: Light, Air Quality, Pressure
+    lux_str = str(int(lux))
+    lux_color = YELLOW if lux < 10 else (GREEN if lux < 1000 else WHITE)
+    draw_card(x0, row2_y, card_w, card_h, "LIGHT", lux_str, "lux", lux_color)
 
-    # Bottom bar
-    fill_rect(0, H - 18, W, 18, DKBLUE)
-    draw_text("ESP32 EnvMonitor", 8, H - 16, GRAY, DKBLUE, 1)
+    co2_status = "Good" if co2 < 1000 else ("Fair" if co2 < 1500 else "Poor")
+    co2_st_color = GREEN if co2 < 1000 else (YELLOW if co2 < 1500 else RED)
+    draw_card(x0 + card_w + gap, row2_y, card_w, card_h,
+              "AIR", co2_status, "quality", co2_st_color)
+
+    p_str = "{:.0f}".format(pressure) if pressure > 0 else "--"
+    draw_card(x0 + 2 * (card_w + gap), row2_y, card_w, card_h,
+              "PRESS", p_str, "hPa", WHITE)
+
+    # Row 3: SD Card, WiFi, Time
+    draw_card(x0, row3_y, card_w, card_h, "SD", sd_free, "used", GREEN)
+
+    wifi_str = "OK" if "." in status else "OFF"
+    wifi_color = GREEN if "." in status else RED
+    draw_card(x0 + card_w + gap, row3_y, card_w, card_h,
+              "WIFI", wifi_str, "", wifi_color)
+
+    # Time card - draw manually with scale 1 value
+    tx3 = x0 + 2 * (card_w + gap)
+    fill_rect(tx3, row3_y, card_w, card_h, CARD_BG)
+    round_rect(tx3, row3_y, card_w, card_h, CARD_BRD, 2)
+    tlx = tx3 + (card_w - text_px("TIME", 1)) // 2
+    draw_text("TIME", tlx, row3_y + 4, WHITE, CARD_BG, 1)
+    if time_str:
+        tvx = tx3 + (card_w - text_px(time_str, 1)) // 2
+        draw_text(time_str, tvx, row3_y + 28, YELLOW, CARD_BG, 1)
+    if date_str:
+        dvx = tx3 + (card_w - text_px(date_str, 1)) // 2
+        draw_text(date_str, dvx, row3_y + 48, LTGRAY, CARD_BG, 1)
+
+    # Bottom bar with IP
+    bot_y = row3_y + card_h + 2
+    fill_rect(0, bot_y, W, H - bot_y, DKBLUE)
+    if status and "." in status:
+        ip_x = (W - text_px(status, 1)) // 2
+        draw_text(status, ip_x, bot_y + 1, GREEN, DKBLUE, 1)

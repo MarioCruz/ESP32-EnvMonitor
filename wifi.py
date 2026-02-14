@@ -2,10 +2,11 @@
 import network
 import time
 
+wlan = network.WLAN(network.STA_IF)
 
-def connect(ssid, password, timeout=15):
+
+def connect(ssid, password, timeout=20):
     """Connect to WiFi. Returns (ip_address, True) or (error_msg, False)"""
-    wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
 
     if wlan.isconnected():
@@ -17,7 +18,7 @@ def connect(ssid, password, timeout=15):
     start = time.time()
     while not wlan.isconnected():
         if time.time() - start > timeout:
-            wlan.active(False)
+            print("WiFi timeout, status:", wlan.status())
             return "Timeout", False
         time.sleep(0.5)
 
@@ -27,18 +28,15 @@ def connect(ssid, password, timeout=15):
 
 
 def is_connected():
-    wlan = network.WLAN(network.STA_IF)
-    return wlan.isconnected()
+    return wlan.active() and wlan.isconnected()
 
 
 def get_ip():
-    wlan = network.WLAN(network.STA_IF)
     if wlan.isconnected():
         return wlan.ifconfig()[0]
     return None
 
 
 def disconnect():
-    wlan = network.WLAN(network.STA_IF)
     wlan.disconnect()
     wlan.active(False)
