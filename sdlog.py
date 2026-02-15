@@ -12,12 +12,9 @@ def init():
     """Mount SD card. Returns True if successful."""
     global _sd, _mounted
     try:
-        # Check if already mounted
+        # Always unmount first if previously mounted
         try:
-            os.statvfs("/sd")
-            _mounted = True
-            print("[SD] Already mounted")
-            return True
+            os.umount("/sd")
         except:
             pass
         import sdcard

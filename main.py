@@ -244,7 +244,9 @@ while True:
                            batt_pct=read_battery_pct())
     if sd_ok and time_str:
         lt = time.localtime(time.time() + TIMEZONE_OFFSET * 3600)
-        sdlog.log(date_str + " " + time_str, co2, temp_c_log, hum, lux, pressure, lt)
+        if not sdlog.log(date_str + " " + time_str, co2, temp_c_log, hum, lux, pressure, lt):
+            print("[Main] SD log failed, remounting...")
+            sd_ok = sdlog.init()
     # LED: green=good, yellow=fair, red=poor CO2
     if co2 > 0 and co2 < 1000:
         set_led(0, 1, 0)
