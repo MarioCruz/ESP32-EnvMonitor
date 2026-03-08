@@ -16,6 +16,8 @@ Built to work with the [EnvMonitor](https://github.com/MarioCruz/EnvMonitor) pro
 - RGB LED status indicator (green=good, yellow=fair, red=poor CO2)
 - Temperature alternates between Celsius and Fahrenheit each refresh cycle
 - SHT4x as backup temp/humidity sensor when SCD4x is unavailable
+- Touchscreen support (E32R40T) — tap dashboard cards for interactive controls
+- Audio alerts for high CO2 and humidity
 
 ## Hardware
 
@@ -102,8 +104,12 @@ Built to work with the [EnvMonitor](https://github.com/MarioCruz/EnvMonitor) pro
 | `veml7700.py` | VEML7700 ambient light sensor driver |
 | `mpl3115a2.py` | MPL3115A2 barometric pressure sensor driver |
 | `config.py` | WiFi credentials, I2C pins, timezone, logging interval (gitignored) |
+| `touch.py` | XPT2046 resistive touch driver (E32R40T only) |
+| `audio.py` | Speaker/audio driver (PWM on GPIO26, enable on GPIO4) |
 | `config.example.py` | Template for config.py |
 | `logo.bin` | Boot logo (320x320 RGB565 binary with 4-byte header) |
+| `utils/test_touch.py` | Visual 4-corner touch calibration test |
+| `utils/test_touch_raw.py` | Raw XPT2046 value debug tool for touch calibration |
 
 ### Setup
 
@@ -124,7 +130,12 @@ mpremote connect /dev/cu.usbserial-210 cp scd4x.py :scd4x.py
 mpremote connect /dev/cu.usbserial-210 cp sht4x.py :sht4x.py
 mpremote connect /dev/cu.usbserial-210 cp veml7700.py :veml7700.py
 mpremote connect /dev/cu.usbserial-210 cp mpl3115a2.py :mpl3115a2.py
+mpremote connect /dev/cu.usbserial-210 cp touch.py :touch.py
+mpremote connect /dev/cu.usbserial-210 cp audio.py :audio.py
 mpremote connect /dev/cu.usbserial-210 cp logo.bin :logo.bin
+mpremote connect /dev/cu.usbserial-210 mkdir :utils
+mpremote connect /dev/cu.usbserial-210 cp utils/test_touch.py :utils/test_touch.py
+mpremote connect /dev/cu.usbserial-210 cp utils/test_touch_raw.py :utils/test_touch_raw.py
 mpremote connect /dev/cu.usbserial-210 reset
 ```
 
@@ -135,6 +146,7 @@ WIFI_SSID = "YourNetwork"
 WIFI_PASSWORD = "YourPassword"
 TIMEZONE_OFFSET = -5        # UTC offset in hours
 LOG_INTERVAL = 5            # Seconds between readings
+TOUCH_ENABLED = True        # Set False for E32N40T (no touch panel)
 ```
 
 ### SD Card Logging
@@ -143,6 +155,49 @@ Data is logged to CSV files on the SD card with daily rotation:
 - Files named `envlog_YYMMDD.csv` (e.g. `envlog_260214.csv`)
 - Columns: timestamp, co2, temp_c, humidity, lux, pressure_hpa
 - Format SD card as FAT32 (MBR) for full capacity
+
+### Touch Screen (E32R40T only)
+
+The E32R40T board has an XPT2046 resistive touch controller sharing the SPI bus with the display. Enable it in `config.py`:
+
+```python
+TOUCH_ENABLED = True   # True for E32R40T, False for E32N40T
+```
+
+When enabled, tap dashboard cards for interactive controls:
+
+| Card | Action |
+|------|--------|
+| **TEMP** | Toggle between Celsius and Fahrenheit |
+| **CO2** | Show air quality detail (Good / Ventilate / Poor / Danger) |
+| **WIFI** | Show network details — IP, gateway, DNS, subnet mask |
+| **TIME** | NTP resync, show local time, UTC, timezone, uptime |
+
+Touch info overlays appear on the bottom row and clear on the next sensor refresh.
+
+### Utilities
+
+Test scripts in the `utils/` directory for hardware validation:
+
+```python
+# Visual touch test — shows 4 boxes, tap each to confirm
+from utils.test_touch import run
+run()
+
+# Raw touch debug — shows XPT2046 raw values for calibration
+from utils.test_touch_raw import run
+run()
+```
+
+If touch coordinates don't align with the screen, use `test_touch_raw.py` to read the raw values at each corner, then update the calibration constants in `touch.py`:
+
+```python
+# touch.py calibration (raw 12-bit XPT2046 values at screen edges)
+X_MIN = 270    # raw value at right edge
+X_MAX = 3850   # raw value at left edge
+Y_MIN = 380    # raw value at bottom edge
+Y_MAX = 3720   # raw value at top edge
+```
 
 ## Links
 
