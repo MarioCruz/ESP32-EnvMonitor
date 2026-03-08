@@ -10,7 +10,8 @@ import ntptime
 import display
 import wifi
 import sdlog
-from config import WIFI_SSID, WIFI_PASSWORD, I2C_SCL_PIN, I2C_SDA_PIN, I2C_FREQUENCY, TIMEZONE_OFFSET, LOG_INTERVAL
+import audio
+from config import WIFI_SSID, WIFI_PASSWORD, WIFI_NETWORKS, I2C_SCL_PIN, I2C_SDA_PIN, I2C_FREQUENCY, TIMEZONE_OFFSET, LOG_INTERVAL, TOUCH_ENABLED
 
 print("[Main] ESP32 EnvMonitor starting...")
 
@@ -28,7 +29,7 @@ time.sleep_ms(500)
 
 # Phase 3: Init systems with progress bar
 display.boot_progress(5, "Connecting WiFi...")
-ip, wifi_ok = wifi.connect(WIFI_SSID, WIFI_PASSWORD)
+ip, wifi_ok = wifi.connect_multi(WIFI_NETWORKS)
 if wifi_ok:
     display.boot_progress(25, "WiFi: " + ip, display.GREEN)
     print("[Main] WiFi:", ip)
@@ -106,9 +107,25 @@ try:
 except Exception as e:
     print("[Main] Sensor error:", e)
 
-display.boot_progress(100, "Ready!", display.GREEN)
-time.sleep_ms(800)
+display.boot_progress(95, "Audio init...")
+try:
+    display.boot_progress(100, "Ready!", display.GREEN)
+    audio.boot_melody()
+except Exception as e:
+    print("[Main] Audio error:", e)
+    display.boot_progress(100, "Ready!", display.GREEN)
+    time.sleep_ms(800)
 display.fill_screen(display.BLACK)
+
+# Touch screen
+touch_mod = None
+if TOUCH_ENABLED:
+    try:
+        import touch
+        touch_mod = touch
+        print("[Main] Touch enabled")
+    except Exception as e:
+        print("[Main] Touch init error:", e)
 
 # RGB LED - common anode (low = on)
 led_r = machine.Pin(22, machine.Pin.OUT, value=1)
@@ -155,6 +172,37 @@ def get_date_str():
     return "{}-{}-{}".format(t[1], t[2], t[0] % 100)
 
 
+# --- Touch zones (match dashboard card grid) ---
+# Card grid: 3x3, card_w=152, card_h=78, gap=5
+_card_w = 152
+_card_h = 78
+_gap = 5
+_row1_y = 28
+_row2_y = _row1_y + _card_h + _gap
+_row3_y = _row2_y + _card_h + _gap
+_x0 = (display.W - (3 * _card_w + 2 * _gap)) // 2
+
+TOUCH_ZONES = {
+    'co2':      (_x0, _row1_y, _card_w, _card_h),
+    'temp':     (_x0 + _card_w + _gap, _row1_y, _card_w, _card_h),
+    'humid':    (_x0 + 2 * (_card_w + _gap), _row1_y, _card_w, _card_h),
+    'light':    (_x0, _row2_y, _card_w, _card_h),
+    'air':      (_x0 + _card_w + _gap, _row2_y, _card_w, _card_h),
+    'pressure': (_x0 + 2 * (_card_w + _gap), _row2_y, _card_w, _card_h),
+    'sd':       (_x0, _row3_y, _card_w, _card_h),
+    'wifi':     (_x0 + _card_w + _gap, _row3_y, _card_w, _card_h),
+    'time':     (_x0 + 2 * (_card_w + _gap), _row3_y, _card_w, _card_h),
+}
+
+def _zone_hit(tx, ty):
+    """Return which zone was tapped, or None."""
+    for name, (zx, zy, zw, zh) in TOUCH_ZONES.items():
+        if zx <= tx <= zx + zw and zy <= ty <= zy + zh:
+            return name
+    return None
+
+touch_prev = False
+
 # Alternate C/F each cycle
 show_f = True
 loop_count = 0
@@ -169,7 +217,7 @@ while True:
     if loop_count > 0 and loop_count % WIFI_CHECK_CYCLES == 0:
         if not wifi.is_connected():
             print("[Main] WiFi lost, reconnecting...")
-            ip, wifi_ok = wifi.connect(WIFI_SSID, WIFI_PASSWORD)
+            ip, wifi_ok = wifi.connect_multi(WIFI_NETWORKS)
             if wifi_ok:
                 print("[Main] WiFi reconnected:", ip)
 
@@ -254,9 +302,128 @@ while True:
         set_led(1, 1, 0)
     else:
         set_led(1, 0, 0)
+    # Audio alerts
+    try:
+        if co2 >= 1500:
+            audio.alert_tone()
+        if hum >= 80:
+            audio.beep(600, 200)
+    except:
+        pass
+    # --- Touch input ---
+    if touch_mod:
+        touch_start = time.ticks_ms()
+        while time.ticks_diff(time.ticks_ms(), touch_start) < (LOG_INTERVAL * 1000):
+            try:
+                pos = touch_mod.read()
+            except:
+                pos = None
+
+            if pos is not None and not touch_prev:
+                zone = _zone_hit(pos[0], pos[1])
+                if zone:
+                    print("[Touch] {} at ({},{})".format(zone, pos[0], pos[1]))
+
+                if zone == 'temp':
+                    # Toggle C/F and refresh immediately
+                    show_f = not show_f
+                    unit = "F" if show_f else "C"
+                    if show_f:
+                        temp_val = temp_c_log * 9.0 / 5.0 + 32.0
+                    else:
+                        temp_val = temp_c_log
+                    display.draw_card(
+                        TOUCH_ZONES['temp'][0], TOUCH_ZONES['temp'][1],
+                        _card_w, _card_h,
+                        "TEMP", "{:.1f}".format(temp_val), unit, display.ORANGE)
+                    print("[Touch] Temp unit:", unit)
+
+                elif zone == 'wifi':
+                    # Show WiFi network details (reconnect if not connected)
+                    if not wifi.is_connected():
+                        display.draw_card(
+                            TOUCH_ZONES['wifi'][0], TOUCH_ZONES['wifi'][1],
+                            _card_w, _card_h,
+                            "WIFI", "...", "connecting", display.YELLOW)
+                        ip, wifi_ok = wifi.connect_multi(WIFI_NETWORKS)
+                    ifcfg = wifi.wlan.ifconfig() if wifi.is_connected() else None
+                    ox = _x0
+                    oy = _row3_y
+                    ow = 3 * _card_w + 2 * _gap
+                    oh = _card_h
+                    display.fill_rect(ox, oy, ow, oh, display.DKBLUE)
+                    display.round_rect(ox, oy, ow, oh, display.CYAN, 2)
+                    if ifcfg:
+                        display.draw_text("IP: " + ifcfg[0], ox + 8, oy + 6, display.GREEN, display.DKBLUE, 1)
+                        display.draw_text("GW: " + ifcfg[2], ox + 8, oy + 26, display.WHITE, display.DKBLUE, 1)
+                        display.draw_text("DNS: " + ifcfg[3], ox + 8, oy + 46, display.WHITE, display.DKBLUE, 1)
+                        display.draw_text("Mask: " + ifcfg[1], ox + 240, oy + 6, display.LTGRAY, display.DKBLUE, 1)
+                        print("[Touch] WiFi IP:{} GW:{} DNS:{} Mask:{}".format(*ifcfg))
+                    else:
+                        display.draw_text("WiFi not connected", ox + 8, oy + 26, display.RED, display.DKBLUE, 1)
+                        print("[Touch] WiFi not connected")
+
+                elif zone == 'time':
+                    # Show time details and NTP resync
+                    synced = False
+                    if wifi.is_connected():
+                        try:
+                            ntptime.settime()
+                            ntp_ok = True
+                            synced = True
+                        except:
+                            pass
+                    ts = get_time_str() if ntp_ok else "--:--"
+                    ds = get_date_str() if ntp_ok else "--"
+                    utc_t = time.localtime()
+                    utc_str = "{:02d}:{:02d} UTC".format(utc_t[3], utc_t[4])
+                    ox = _x0
+                    oy = _row3_y
+                    ow = 3 * _card_w + 2 * _gap
+                    oh = _card_h
+                    display.fill_rect(ox, oy, ow, oh, display.DKBLUE)
+                    display.round_rect(ox, oy, ow, oh, display.CYAN, 2)
+                    display.draw_text("Time: " + ts, ox + 8, oy + 6, display.YELLOW, display.DKBLUE, 1)
+                    display.draw_text("Date: " + ds, ox + 8, oy + 26, display.WHITE, display.DKBLUE, 1)
+                    display.draw_text("UTC:  " + utc_str, ox + 8, oy + 46, display.LTGRAY, display.DKBLUE, 1)
+                    ntp_str = "synced" if synced else "failed"
+                    ntp_clr = display.GREEN if synced else display.RED
+                    display.draw_text("NTP: " + ntp_str, ox + 240, oy + 6, ntp_clr, display.DKBLUE, 1)
+                    display.draw_text("TZ: UTC{:+d}".format(TIMEZONE_OFFSET), ox + 240, oy + 26, display.LTGRAY, display.DKBLUE, 1)
+                    uptime_s = time.ticks_ms() // 1000
+                    up_h, up_m = divmod(uptime_s // 60, 60)
+                    display.draw_text("Up: {}h {}m".format(up_h, up_m % 60), ox + 240, oy + 46, display.LTGRAY, display.DKBLUE, 1)
+                    print("[Touch] Time:{} {} NTP:{}".format(ts, ds, ntp_str))
+
+                elif zone == 'co2':
+                    # Flash CO2 level detail
+                    if co2 < 400:
+                        msg, clr = "Outdoor", display.GREEN
+                    elif co2 < 1000:
+                        msg, clr = "Good", display.GREEN
+                    elif co2 < 1500:
+                        msg, clr = "Ventilate", display.YELLOW
+                    elif co2 < 2000:
+                        msg, clr = "Poor!", display.ORANGE
+                    else:
+                        msg, clr = "Danger!", display.RED
+                    display.draw_card(
+                        TOUCH_ZONES['co2'][0], TOUCH_ZONES['co2'][1],
+                        _card_w, _card_h,
+                        "CO2 " + str(co2), msg, "ppm", clr)
+                    print("[Touch] CO2 detail:", msg)
+
+                touch_prev = True
+            elif pos is None:
+                touch_prev = False
+
+            time.sleep_ms(50)
+    else:
+        time.sleep(LOG_INTERVAL)
+
     show_f = not show_f
     loop_count += 1
     gc.collect()
   except Exception as e:
     print("[Main] Loop error:", e)
-  time.sleep(LOG_INTERVAL)
+

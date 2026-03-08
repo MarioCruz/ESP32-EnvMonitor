@@ -19,12 +19,26 @@ def connect(ssid, password, timeout=20):
     while not wlan.isconnected():
         if time.time() - start > timeout:
             print("WiFi timeout, status:", wlan.status())
+            wlan.disconnect()
             return "Timeout", False
         time.sleep(0.5)
 
     ip = wlan.ifconfig()[0]
     print("Connected:", ip)
     return ip, True
+
+
+def connect_multi(networks, timeout=15):
+    """Try multiple networks in order. Returns (ip, True) or (error, False)"""
+    wlan.active(True)
+    if wlan.isconnected():
+        return wlan.ifconfig()[0], True
+    for ssid, pw in networks:
+        print("Trying WiFi:", ssid)
+        ip, ok = connect(ssid, pw, timeout)
+        if ok:
+            return ip, True
+    return "No network", False
 
 
 def is_connected():
